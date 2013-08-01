@@ -3,8 +3,9 @@
 #include <Tlc5940.h>
 #include "FastSPI_LED2.h"
 
+// hacky fix for led chain glitching:
+//   break it out into two chains!
 // todo: add rs-485 functionality
-
 
 #define MACHINEID  '1'  // nodes '1' through 'A' for type-ability
 
@@ -31,32 +32,37 @@
 
 #define BALLRELTIME 10000 // ball release time at start of game
 #define FIRELEN     1000  // length of fire blast in usec
-#define LEDSEGLEN   6     // how many LEDs per digit segment
-#define NUM_LEDS    (LEDSEGLEN * 28)
+#define LEDSEGLEN   5     // how many LEDs per digit segment
+#define LEDSEGLEN2  3     // same, for ball #
+//#define NUM_LEDS    ((LEDSEGLEN * 21) + LEDSEGLEN2 * 7) 
+#define NUM_LEDS 70
+#define NUM_LEDS2 56
+
 
 byte n;
 byte c;
 byte ballnum;
-byte score;
+unsigned short score;
 boolean crazy;
 boolean idle;
 
 Button holes[7] = { 
-  Button(PIN20, BUTTON_PULLUP_INTERNAL), 
-  Button(PIN30, BUTTON_PULLUP_INTERNAL), 
-  Button(PIN40, BUTTON_PULLUP_INTERNAL),
-  Button(PIN50, BUTTON_PULLUP_INTERNAL),
-  Button(PIN100, BUTTON_PULLUP_INTERNAL),
-  Button(PIN10, BUTTON_PULLUP_INTERNAL),
-  Button(PIN0, BUTTON_PULLUP_INTERNAL),
+  Button(PIN20, BUTTON_PULLUP_INTERNAL, true, 1000), 
+  Button(PIN30, BUTTON_PULLUP_INTERNAL, true, 1000), 
+  Button(PIN40, BUTTON_PULLUP_INTERNAL, true, 1000),
+  Button(PIN50, BUTTON_PULLUP_INTERNAL, true, 1000),
+  Button(PIN100, BUTTON_PULLUP_INTERNAL, true, 1000),
+  Button(PIN10, BUTTON_PULLUP_INTERNAL, true, 1000),
+  Button(PIN0, BUTTON_PULLUP_INTERNAL, true, 1000),
 };
 byte points[7] = {20, 30, 40, 50, 100, 10, 0};
 unsigned long firetime[5];
 unsigned long ballreltime;
 
-struct CRGB { byte g; byte r; byte b; };
-struct CRGB leds[NUM_LEDS];
+CRGB leds[NUM_LEDS];
+CRGB leds2[NUM_LEDS2];
 WS2811Controller800Mhz<LEDPIN> LED;
+WS2811Controller800Mhz<19> LED2;
 
 
 // setup
@@ -72,6 +78,39 @@ void setup() {
   
   Serial.begin(115200);
   Serial.println("starting...");
+  
+  LEDS.addLeds<WS2811, LEDPIN, GRB>(leds, NUM_LEDS);
+  LEDS.addLeds<WS2811, 19, GRB>(leds2, NUM_LEDS2);
+  
+  int x;
+  memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
+  memset(leds2, 0, NUM_LEDS2 * sizeof(struct CRGB));
+  LEDS.show();
+  
+  
+  delay(1000);
+  
+  /*
+  for(x=0;x<=999;x++) {
+    updatescore(x,x%10);
+    delay(500);
+  }
+  */
+  
+  /*
+  int y;
+  for(y=0;y<=NUM_LEDS;y++) {
+    for(x=0;x<y;x++) {
+      leds[y].r = 255;
+      leds[y].g = 0;
+      leds[y].b = 0;
+    }
+    LEDS.show();
+    delay(50);
+  }
+  */
+  
+  idle = true;
 
 }
 
@@ -131,59 +170,54 @@ void endcrazy() {
 
 byte DIGITS[] = { 0x77, 0x44, 0x3E, 0x6E, 0x4D, 0x6B, 0x7B, 0x46, 0x7F, 0x4F };
 
-void updatescore(byte score, byte ball) {
-  unsigned short i, j, k, pos;
+void updatescore(unsigned short score, byte ball) {
+  unsigned short i, j, k;
   byte lite[4];
   memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
-  // convert to 0-32 array
-  for(i=0;i<8;i++) {
-    for(j=0;j<10;j++) {
-      if( (score / 100) && 1<<i && DIGITS[j] ) {
-        lite[0] |= 1<<i;
+  memset(leds2, 0, NUM_LEDS2 * sizeof(struct CRGB));
+ 
+  Serial.print("ball = ");
+  Serial.println(ball);
+  
+  i = score / 100;
+  for(j=0;j<7;j++) {
+    if( (1<<j) & DIGITS[i] ) {
+      for(k=0;k<LEDSEGLEN;k++) {
+        leds[j*LEDSEGLEN + k].r = 255;
       }
     }
   }
   
-  for(i=0;i<8;i++) {
-    for(j=0;j<10;j++) {
-      if( ((score % 100) / 10) && 1<<i && DIGITS[j] ) {
-        lite[1] |= 1<<i;
+  i = (score / 10) % 10;
+  for(j=0;j<7;j++) {
+    if( (1<<j) & DIGITS[i] ) {
+      for(k=0;k<LEDSEGLEN;k++) {
+        leds[(j+7)*LEDSEGLEN + k].r = 255;
       }
     }
   }
   
-  for(i=0;i<8;i++) {
-    for(j=0;j<10;j++) {
-      if( (score % 10) && 1<<i && DIGITS[j] ) {
-        lite[2] |= 1<<i;
+  
+  i = score % 10;
+  for(j=0;j<7;j++) {
+    if( (1<<j) & DIGITS[i] ) {
+      for(k=0;k<LEDSEGLEN;k++) {
+        //leds[(j+14)*LEDSEGLEN + k].r = 255;
+        leds2[j*LEDSEGLEN + k].r = 255;
       }
     }
   }
   
-  for(i=0;i<8;i++) {
-    for(j=0;j<10;j++) {
-      if( ball && 1<<i && DIGITS[j] ) {
-        lite[3] |= 1<<i;
-      }
-    }
-  }
-  
-  // convert to individual LEDs
-  pos = 0;
-  for(i=0;i<4;i++) {
-    for(j=0;j<7;j++) {
-      if( lite[i] && 1<<j ) {
-        for(k=0;k<LEDSEGLEN;k++) {
-          leds[pos].r = 255;
-          leds[pos].g = 0;
-          leds[pos].b = 0;
-          pos++;
-        }
+  for(j=0;j<7;j++) {
+    if( (1<<j) & DIGITS[ball] ) {
+      for(k=0;k<LEDSEGLEN2;k++) {
+        //leds[21*LEDSEGLEN + j*LEDSEGLEN2 + k].r = 255;
+        leds2[7*LEDSEGLEN + j*LEDSEGLEN2 + k].r = 255;
       }
     }
   }
         
-  LED.showRGB((byte*)leds, NUM_LEDS);
+  LEDS.show();
 }
 
 // main loop
@@ -201,22 +235,30 @@ void loop() {
   }
   Tlc.update();
 
-  
-  // check button presses
-  for(c=0;c<7;c++) {
-    if( holes[c].uniquePress() ) {
-      score += points[c];
-      ballnum += 1;
-      if(c < 5) {
-        firetime[c] = millis() + FIRELEN;
-        Tlc.set(c,4095);
-      }
-      if(ballnum >= 9) {
-        endgame();
+  if(!idle) {
+    // check button presses
+    for(c=0;c<7;c++) {
+      if( holes[c].uniquePress() ) {
+        score += points[c];
+        Serial.print("points scored: ");
+        Serial.print(points[c]);
+        Serial.print(" total score: ");
+        Serial.print(score);
+        ballnum += 1;
+        Serial.print(" ball number: ");
+        Serial.println(ballnum);
+        updatescore(score, ballnum);
+        if(c < 5) {
+          firetime[c] = millis() + FIRELEN; 
+          Tlc.set(c,4095);
+        }
+        if(ballnum >= 9) {
+          endgame();
+        }
       }
     }
+    Tlc.update();
   }
-  Tlc.update();
   
   // serial messages:
   // # is '0' - '9', 'A' or '*' for broadcast
@@ -232,15 +274,19 @@ void loop() {
     if( (n == MACHINEID) || (n == '*')) {
       switch(c) {
         case 'S' :
+          Serial.println("starting game");
           startgame();
           break;
         case 'X' :
+          Serial.println("ending game");
           endgame();
           break;
         case '+' :
+          Serial.println("CRAZY MODE");
           startcrazy();
           break;
         case '-' :
+          Serial.println("returning to sanity");
           endcrazy();
           break;
         case '?' : 
