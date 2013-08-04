@@ -5,20 +5,24 @@
 
 // hacky fix for led chain glitching:
 //   break it out into two chains!
-// todo: add rs-485 functionality
+// things to fix:
+//   proper USB debug statements instead of if(DEBUG)
 
-#define MACHINEID  '1'  // nodes '1' through 'A' for type-ability
+// DEBUG 1 = debug serial output w/USB cable; DEBUG 0 = serial output over RS-485
+#define DEBUG 1
+#define MACHINEID  'A'  // nodes '1' through 'A' for type-ability
 
 #define CTRLRE     5
 #define CTRLDE     6
 #define ARMEDPIN   7
 #define LEDPIN     8
+#define LEDPIN2    19
 #define PIN20      14
 #define PIN30      15
 #define PIN40      16
 #define PIN50      17
 #define PIN100     18
-#define PIN10      19
+//#define PIN10      19 // we don't have a ball switch for this right now
 #define PIN0       2
 
 #define FLAME20     0
@@ -46,23 +50,23 @@ unsigned short score;
 boolean crazy;
 boolean idle;
 
-Button holes[7] = { 
+Button holes[6] = { 
   Button(PIN20, BUTTON_PULLUP_INTERNAL, true, 1000), 
   Button(PIN30, BUTTON_PULLUP_INTERNAL, true, 1000), 
   Button(PIN40, BUTTON_PULLUP_INTERNAL, true, 1000),
   Button(PIN50, BUTTON_PULLUP_INTERNAL, true, 1000),
   Button(PIN100, BUTTON_PULLUP_INTERNAL, true, 1000),
-  Button(PIN10, BUTTON_PULLUP_INTERNAL, true, 1000),
+  //Button(PIN10, BUTTON_PULLUP_INTERNAL, true, 1000),
   Button(PIN0, BUTTON_PULLUP_INTERNAL, true, 1000),
 };
-byte points[7] = {20, 30, 40, 50, 100, 10, 0};
+byte points[6] = {20, 30, 40, 50, 100, 0};
 unsigned long firetime[5];
 unsigned long ballreltime;
 
 CRGB leds[NUM_LEDS];
 CRGB leds2[NUM_LEDS2];
 WS2811Controller800Mhz<LEDPIN> LED;
-WS2811Controller800Mhz<19> LED2;
+WS2811Controller800Mhz<LEDPIN2> LED2;
 
 
 // setup
@@ -77,7 +81,19 @@ void setup() {
   }
   
   Serial.begin(115200);
-  Serial.println("starting...");
+  if( DEBUG ) {
+    Serial.println("starting...");
+  }
+  
+  pinMode(CTRLRE, OUTPUT); // RE receive active low
+  if( DEBUG ) {
+    digitalWrite(CTRLRE, HIGH);
+  }
+  else {
+    digitalWrite(CTRLRE, LOW);
+  }
+  pinMode(CTRLDE, OUTPUT); // DE transmit active high
+  digitalWrite(CTRLDE, LOW);
   
   LEDS.addLeds<WS2811, LEDPIN, GRB>(leds, NUM_LEDS);
   LEDS.addLeds<WS2811, 19, GRB>(leds2, NUM_LEDS2);
@@ -176,9 +192,6 @@ void updatescore(unsigned short score, byte ball) {
   memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
   memset(leds2, 0, NUM_LEDS2 * sizeof(struct CRGB));
  
-  Serial.print("ball = ");
-  Serial.println(ball);
-  
   i = score / 100;
   for(j=0;j<7;j++) {
     if( (1<<j) & DIGITS[i] ) {
@@ -237,16 +250,34 @@ void loop() {
 
   if(!idle) {
     // check button presses
-    for(c=0;c<7;c++) {
+    for(c=0;c<6;c++) {
       if( holes[c].uniquePress() ) {
         score += points[c];
-        Serial.print("points scored: ");
-        Serial.print(points[c]);
-        Serial.print(" total score: ");
-        Serial.print(score);
+        if( crazy && (c < 5) ) {
+          if( !DEBUG ) {
+            digitalWrite(CTRLRE, HIGH); // yes, this part may clobber the master transmitting
+            digitalWrite(CTRLDE, HIGH);
+          }
+          Serial.print("*");
+          Serial.print(c+1);
+          delay(5);
+          if( !DEBUG ) {
+            digitalWrite(CTRLRE, LOW);
+            digitalWrite(CTRLDE, LOW);
+          }
+        }
+          
+        if( DEBUG ) {
+          Serial.print("points scored: ");
+          Serial.print(points[c]);
+          Serial.print(" total score: ");
+          Serial.print(score);
+        }
         ballnum += 1;
-        Serial.print(" ball number: ");
-        Serial.println(ballnum);
+        if( DEBUG ) {
+          Serial.print(" ball number: ");
+          Serial.println(ballnum);
+        }
         updatescore(score, ballnum);
         if(c < 5) {
           firetime[c] = millis() + FIRELEN; 
@@ -267,57 +298,78 @@ void loop() {
   // '#-' - leave crazy mode
   // '#X' - quit current game
   // '#?' - query ball number
-  // '#0' - '#4' - crazyfire solenoid 0 through 4
+  // '#1' - '#5' - crazyfire solenoid 1 through 5
   if(Serial.available() >= 2) {
     n = Serial.read();
-    c = Serial.read();
-    if( (n == MACHINEID) || (n == '*')) {
+    if( (n == MACHINEID || (n == '*')) ) {
+      c = Serial.read();
       switch(c) {
         case 'S' :
-          Serial.println("starting game");
+          if( DEBUG ) {
+            Serial.println("starting game");
+          }
           startgame();
           break;
         case 'X' :
-          Serial.println("ending game");
+          if( DEBUG ) {
+            Serial.println("ending game");
+          }
           endgame();
           break;
         case '+' :
-          Serial.println("CRAZY MODE");
+          if( DEBUG ) {
+            Serial.println("CRAZY MODE");
+          }
           startcrazy();
           break;
         case '-' :
-          Serial.println("returning to sanity");
+          if( DEBUG ) {
+            Serial.println("returning to sanity");
+          }
           endcrazy();
           break;
-        case '?' : 
-          Serial.write(score);
+        case '?' :
+          delay(5);
+          if( !DEBUG ) {
+            digitalWrite(CTRLRE, HIGH);
+            digitalWrite(CTRLDE, HIGH);
+          }
+          Serial.print(MACHINEID);
+          Serial.print(": ");
+          Serial.print(score);
+          Serial.print(" ");
           Serial.print(ballnum);
+          delay(5);
+          if( !DEBUG ) {
+            digitalWrite(CTRLRE, LOW);
+            digitalWrite(CTRLDE, LOW);
+          }
           break;
-        case '0' :
+        case '1' :
           if(crazy) {
             firetime[0] = millis() + FIRELEN;
             Tlc.set(0, 4095);
           }
           break;
-        case '1' :
+        case '2' :
           if(crazy) {
             firetime[1] = millis() + FIRELEN;
             Tlc.set(1, 4095);
           }
           break;
-        case '2' :
+        case '3' :
           if(crazy) {
             firetime[2] = millis() + FIRELEN;
             Tlc.set(2, 4095);
           }
           break;
-        case '3' :
+        case '4' :
           if(crazy) {
             firetime[3] = millis() + FIRELEN;
             Tlc.set(3, 4095);
           }
           break;
-          case '4' :
+        case '5' :
           if(crazy) {
             firetime[4] = millis() + FIRELEN;
             Tlc.set(4, 4095);
