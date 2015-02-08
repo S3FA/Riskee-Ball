@@ -1,73 +1,101 @@
 #include <Button.h>
 #include <SPI.h>
 #include <Tlc5940.h>
-#include "FastSPI_LED2.h"
 
-// hacky fix for led chain glitching:
-//   break it out into two chains!
-// things to fix:
-//   proper USB debug statements instead of if(DEBUG)
+// Make sure that tlc_config.h file changed to say
+// #define NUM_TLCS    2 
+//See 'Using two or more TLC5940s': http://tronixstuff.com/2013/10/21/tutorial-arduino-tlc5940-led-driver-ic/
+
+// Duemilanove ATmega328
+// ttyusbserial
+// todo: add rs-485 functionality
 
 // DEBUG 1 = debug serial output w/USB cable; DEBUG 0 = serial output over RS-485
 #define DEBUG 1
-#define MACHINEID  'A'  // nodes '1' through 'A' for type-ability
 
+//http://alex.kathack.com/codes/tlc5940arduino/html_r011/group__CoreFunctions.html
+//4095 is the max value for a channel on a tlc5940
+#define TLC_ON 4095
+#define TLC_OFF 0
+
+//Arduino
 #define CTRLRE     5
 #define CTRLDE     6
-#define ARMEDPIN   7
-#define LEDPIN     8
-#define LEDPIN2    19
-#define PIN20      14
-#define PIN30      15
-#define PIN40      16
-#define PIN50      17
-#define PIN100     18
-//#define PIN10      19 // we don't have a ball switch for this right now
-#define PIN0       2
+#define ARMEDPIN   7 // System armed - Deadman pin - automatically tripped by applying power to Solenoid DC line?
+#define LEDPIN     8 // *** Necessary?
+#define PIN20      14 // Ball switch 20 points
+#define PIN30      15 // Ball switch 30 points
+#define PIN40      16 // Ball switch 40 points
+#define PIN50      17 // Ball switch 50 points
+#define PIN100     18 // Ball switch 100 points
+// #define PIN10      19  // *** Not used (never existed)
+//#define PIN0       2   // *** Not used (no score hole switch was always unreliable, omitted)
 
-#define FLAME20     0
-#define FLAME30     1
-#define FLAME40     2
-#define FLAME50     3
-#define FLAME100    4
-#define BALLRELEASE 5
-#define SPINLIGHT   6
-#define KLAXON      7
+//TLC5940
+  // Solenoids
+#define FLAME20     0  // Solenoid 20 points
+#define FLAME30     1  // Solenoid 30 points
+#define FLAME40     2  // Solenoid 40 points
+#define FLAME50     3  // Solenoid 50 points
+#define FLAME100    4  // Solenoid 100 points
+//#define BALLRELEASE 5  // *** Not used (ball release switch was unreliable, omitted)
 
-#define BALLRELTIME 10000 // ball release time at start of game
+// Scoreboard!
+// Zeros digit simply turns on when the 
+#define LEDONE      6
+
+// Tens digit 7-segment
+#define LEDTENA     7
+#define LEDTENB     8
+#define LEDTENC     9
+#define LEDTEND     10
+#define LEDTENE     11
+#define LEDTENF     12
+#define LEDTENG     13
+
+// Hundreds digit 7-segment
+#define LEDHUNDREDA 14
+#define LEDHUNDREDB 15
+#define LEDHUNDREDC 16
+#define LEDHUNDREDD 17
+#define LEDHUNDREDE 18
+#define LEDHUNDREDF 19
+#define LEDHUNDREDG 20
+
 #define FIRELEN     1000  // length of fire blast in usec
-#define LEDSEGLEN   5     // how many LEDs per digit segment
-#define LEDSEGLEN2  3     // same, for ball #
-//#define NUM_LEDS    ((LEDSEGLEN * 21) + LEDSEGLEN2 * 7) 
-#define NUM_LEDS 70
-#define NUM_LEDS2 56
 
+//Pin to Digit Conversion (Following 7 seg cathode configuration)
+int ONE[] = {LEDONE};
+int TEN[] = {LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG };
+int HUNDRED[] = {LEDHUNDREDA, LEDHUNDREDB, LEDHUNDREDC, LEDHUNDREDD, LEDHUNDREDE, LEDHUNDREDF, LEDHUNDREDG};
+int ALLSEGS[] = {LEDONE, LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG, LEDHUNDREDA, 
+      LEDHUNDREDB, LEDHUNDREDC, LEDHUNDREDD, LEDHUNDREDE, LEDHUNDREDF, LEDHUNDREDG};
 
-byte n;
-byte c;
-byte ballnum;
 unsigned short score;
-boolean crazy;
-boolean idle;
 
-Button holes[6] = { 
-  Button(PIN20, BUTTON_PULLUP_INTERNAL, true, 1000), 
+//points must be same length as holes and firetime
+unsigned long firetime[5];
+Button holes[5] = { 
+  Button(PIN20, BUTTON_PULLUP_INTERNAL, true, 1000),  
   Button(PIN30, BUTTON_PULLUP_INTERNAL, true, 1000), 
   Button(PIN40, BUTTON_PULLUP_INTERNAL, true, 1000),
   Button(PIN50, BUTTON_PULLUP_INTERNAL, true, 1000),
-  Button(PIN100, BUTTON_PULLUP_INTERNAL, true, 1000),
-  //Button(PIN10, BUTTON_PULLUP_INTERNAL, true, 1000),
-  Button(PIN0, BUTTON_PULLUP_INTERNAL, true, 1000),
+  Button(PIN100, BUTTON_PULLUP_INTERNAL, true, 1000)
 };
-byte points[6] = {20, 30, 40, 50, 100, 0};
-unsigned long firetime[5];
-unsigned long ballreltime;
 
-CRGB leds[NUM_LEDS];
-CRGB leds2[NUM_LEDS2];
-WS2811Controller800Mhz<LEDPIN> LED;
-WS2811Controller800Mhz<LEDPIN2> LED2;
+byte points[5] = {20, 30, 40, 50, 100};
 
+byte seven_seg_digits[10][7] = { { 1,1,1,1,1,1,0 },  // ZERO
+  { 0,1,1,0,0,0,0 }, // ONE
+  { 1,1,0,1,1,0,1 }, // TWO
+  { 1,1,1,1,0,0,1 }, // THREE
+  { 0,1,1,0,0,1,1 }, // FOUR
+  { 1,0,1,1,0,1,1 }, // FIVE
+  { 1,0,1,1,1,1,1 }, // SIX
+  { 1,1,1,0,0,0,0 }, // SEVEN
+  { 1,1,1,1,1,1,1 }, // EIGHT
+  { 1,1,1,0,0,1,1 }  // NINE
+};
 
 // setup
 void setup() {
@@ -76,310 +104,114 @@ void setup() {
   Tlc.clear();
   Tlc.update();
   
-  for(c=0;c<5;c++) {
+  score = 0;
+  
+  updatescore(score);
+  
+  for(c=0;c < sizeof(firetime);c++) {
     firetime[c] = 0;
   }
   
-  Serial.begin(115200);
-  if( DEBUG ) {
-    Serial.println("starting...");
-  }
+  // *** WHAT DID THIS DO? *** //
+  /*Serial.begin(57600); // *** WHAT DID THIS DO? *** //
   
   pinMode(CTRLRE, OUTPUT); // RE receive active low
   if( DEBUG ) {
     digitalWrite(CTRLRE, HIGH);
+    Serial.println("starting...");
   }
   else {
     digitalWrite(CTRLRE, LOW);
   }
   pinMode(CTRLDE, OUTPUT); // DE transmit active high
   digitalWrite(CTRLDE, LOW);
-  
-  LEDS.addLeds<WS2811, LEDPIN, GRB>(leds, NUM_LEDS);
-  LEDS.addLeds<WS2811, 19, GRB>(leds2, NUM_LEDS2);
-  
-  int x;
-  memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
-  memset(leds2, 0, NUM_LEDS2 * sizeof(struct CRGB));
-  LEDS.show();
-  
-  
+
   delay(1000);
   
-  /*
-  for(x=0;x<=999;x++) {
-    updatescore(x,x%10);
-    delay(500);
-  }
-  */
-  
-  /*
-  int y;
-  for(y=0;y<=NUM_LEDS;y++) {
-    for(x=0;x<y;x++) {
-      leds[y].r = 255;
-      leds[y].g = 0;
-      leds[y].b = 0;
-    }
-    LEDS.show();
-    delay(50);
-  }
-  */
-  
-  idle = true;
-
-}
-
-void startgame() {
-  ballnum = 0;
-  score = 0;
-  idle = false;
-  crazy = false;
-  updatescore(score, ballnum);
-  Tlc.set(BALLRELEASE, 4095);
-  ballreltime = millis() + BALLRELTIME;
-  Tlc.update();
-}
-
-void endgame() {
-  Tlc.clear();
-  Tlc.update();
-  ballnum = 9;
-  idle = true;
-  crazy = false;
-}
-
-void startcrazy() {
-  crazy = true;
-  Tlc.set(SPINLIGHT, 4095);
-  Tlc.set(KLAXON, 4095);
-  Tlc.update();
-}
-
-void endcrazy() {
-  crazy = false;
-  Tlc.set(SPINLIGHT, 0);
-  Tlc.set(KLAXON, 0);
-  Tlc.update();
-}
-
-// this assumes four digits: three for score, one for balls thrown
-//     x1x     x 8x     x15x
-//    x   x   x    x   x    x
-//    0   2   7    9   14   16
-//    x   x   x    x   x    x
-//     x3x     x10x     x17x
-//    x   x   x    x   x    x
-//    4   6   11   13  20   18
-//    x   x   x    x   x    x
-//     x5x     x12x     x19x
-//
-//             x22x         
-//            x    x  
-//            21   23  
-//            x    x  
-//             x24x   
-//            x    x  
-//            25   27  
-//            x    x  
-//             x26x   
-
-byte DIGITS[] = { 0x77, 0x44, 0x3E, 0x6E, 0x4D, 0x6B, 0x7B, 0x46, 0x7F, 0x4F };
-
-void updatescore(unsigned short score, byte ball) {
-  unsigned short i, j, k;
-  byte lite[4];
-  memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
-  memset(leds2, 0, NUM_LEDS2 * sizeof(struct CRGB));
+  idle = true;*/
+  // *** WHAT DID THIS DO? *** //
  
-  i = score / 100;
-  for(j=0;j<7;j++) {
-    if( (1<<j) & DIGITS[i] ) {
-      for(k=0;k<LEDSEGLEN;k++) {
-        leds[j*LEDSEGLEN + k].r = 255;
-      }
-    }
-  }
+}
+
+
+// three digits for score TLC 4950 Pin Numbers (7 Segment Common Cathode Configuration)
+//     x 14 x     x  7 x     x 6 x
+//    x      x   x      x   x     x
+//    19    15  12      8   6     6
+//    x      x   x      x   x     x
+//     x 20 x     x 13 x     x 6 x
+//    x      x   x      x   x      x
+//    18     16 11     9    6      6
+//    x      x   x      x   x      x
+//     x 17 x     x 10 x     x 6 x
+
   
+//Should explicitly update all segments of the display
+void updatescore(unsigned short score) {
+  unsigned short i, j, k;
+
+ //TODO: Zero Out Digits
+ for(c=0;c<sizeof(ALLSEGS);c++) {
+    Tlc.set(ALLSEGS[c],TLC_OFF);
+  }
+      
+  //Ten Digit
   i = (score / 10) % 10;
   for(j=0;j<7;j++) {
-    if( (1<<j) & DIGITS[i] ) {
-      for(k=0;k<LEDSEGLEN;k++) {
-        leds[(j+7)*LEDSEGLEN + k].r = 255;
-      }
+    if(seven_seg_digits[i][j]==1){
+      Tlc.set(TEN[j],TLC_ON);
     }
   }
   
-  
-  i = score % 10;
+  //Hundred Digit
+  i = (score / 100) % 10;
   for(j=0;j<7;j++) {
-    if( (1<<j) & DIGITS[i] ) {
-      for(k=0;k<LEDSEGLEN;k++) {
-        //leds[(j+14)*LEDSEGLEN + k].r = 255;
-        leds2[j*LEDSEGLEN + k].r = 255;
-      }
+    if(seven_seg_digits[i][j]==1){
+      Tlc.set(HUNDRED[j],TLC_ON);
     }
   }
   
-  for(j=0;j<7;j++) {
-    if( (1<<j) & DIGITS[ball] ) {
-      for(k=0;k<LEDSEGLEN2;k++) {
-        //leds[21*LEDSEGLEN + j*LEDSEGLEN2 + k].r = 255;
-        leds2[7*LEDSEGLEN + j*LEDSEGLEN2 + k].r = 255;
-      }
-    }
-  }
-        
-  LEDS.show();
+  //Zero Digit (on or off)
+  Tlc.set(ONE[0],TLC_ON);
+  
+  Tlc.update();
+  
 }
 
 // main loop
 void loop() {
   
-  // turn off active flames
-  for(c=0;c<5;c++) {
+  // turn off active flames when their time is up
+  for(c=0;c < sizeof(firetime);c++) {
     if( firetime[c] < millis() ) {
-      Tlc.set(c,0);
+      Tlc.set(c,TLC_OFF);
     }
   }
   
-  if( ballreltime < millis() ) {
-    Tlc.set(BALLRELEASE, 0);
-  }
   Tlc.update();
 
-  if(!idle) {
-    // check button presses
-    for(c=0;c<6;c++) {
-      if( holes[c].uniquePress() ) {
-        score += points[c];
-        if( crazy && (c < 5) ) {
-          if( !DEBUG ) {
-            digitalWrite(CTRLRE, HIGH); // yes, this part may clobber the master transmitting
-            digitalWrite(CTRLDE, HIGH);
-          }
-          Serial.print("*");
-          Serial.print(c+1);
-          delay(5);
-          if( !DEBUG ) {
-            digitalWrite(CTRLRE, LOW);
-            digitalWrite(CTRLDE, LOW);
-          }
-        }
-          
-        if( DEBUG ) {
-          Serial.print("points scored: ");
-          Serial.print(points[c]);
-          Serial.print(" total score: ");
-          Serial.print(score);
-        }
-        ballnum += 1;
-        if( DEBUG ) {
-          Serial.print(" ball number: ");
-          Serial.println(ballnum);
-        }
-        updatescore(score, ballnum);
-        if(c < 5) {
-          firetime[c] = millis() + FIRELEN; 
-          Tlc.set(c,4095);
-        }
-        if(ballnum >= 9) {
-          endgame();
-        }
+  // check button presses
+  for(c=0;c < sizeof(holes);c++) {
+    if( holes[c].uniquePress() ) {
+      score += points[c];
+      updatescore(score);
+      
+      if( DEBUG ) {
+        Serial.print("points scored: ");
+        Serial.print(points[c]);
+        Serial.print(" total score: ");
+        Serial.print(score);
       }
+
+      firetime[c] = millis() + FIRELEN; 
+      Tlc.set(c,TLC_ON); //Flame on!
+
     }
+    
     Tlc.update();
   }
-  
-  // serial messages:
-  // # is '0' - '9', 'A' or '*' for broadcast
-  // '#S' - start new game
-  // '#+' - enter crazy mode
-  // '#-' - leave crazy mode
-  // '#X' - quit current game
-  // '#?' - query ball number
-  // '#1' - '#5' - crazyfire solenoid 1 through 5
-  if(Serial.available() >= 2) {
-    n = Serial.read();
-    if( (n == MACHINEID || (n == '*')) ) {
-      c = Serial.read();
-      switch(c) {
-        case 'S' :
-          if( DEBUG ) {
-            Serial.println("starting game");
-          }
-          startgame();
-          break;
-        case 'X' :
-          if( DEBUG ) {
-            Serial.println("ending game");
-          }
-          endgame();
-          break;
-        case '+' :
-          if( DEBUG ) {
-            Serial.println("CRAZY MODE");
-          }
-          startcrazy();
-          break;
-        case '-' :
-          if( DEBUG ) {
-            Serial.println("returning to sanity");
-          }
-          endcrazy();
-          break;
-        case '?' :
-          delay(5);
-          if( !DEBUG ) {
-            digitalWrite(CTRLRE, HIGH);
-            digitalWrite(CTRLDE, HIGH);
-          }
-          Serial.print(MACHINEID);
-          Serial.print(": ");
-          Serial.print(score);
-          Serial.print(" ");
-          Serial.print(ballnum);
-          delay(5);
-          if( !DEBUG ) {
-            digitalWrite(CTRLRE, LOW);
-            digitalWrite(CTRLDE, LOW);
-          }
-          break;
-        case '1' :
-          if(crazy) {
-            firetime[0] = millis() + FIRELEN;
-            Tlc.set(0, 4095);
-          }
-          break;
-        case '2' :
-          if(crazy) {
-            firetime[1] = millis() + FIRELEN;
-            Tlc.set(1, 4095);
-          }
-          break;
-        case '3' :
-          if(crazy) {
-            firetime[2] = millis() + FIRELEN;
-            Tlc.set(2, 4095);
-          }
-          break;
-        case '4' :
-          if(crazy) {
-            firetime[3] = millis() + FIRELEN;
-            Tlc.set(3, 4095);
-          }
-          break;
-        case '5' :
-          if(crazy) {
-            firetime[4] = millis() + FIRELEN;
-            Tlc.set(4, 4095);
-          }
-          break;
-      }
-      Tlc.update();
-    }
-  }
-
 }
+
+
 
 
