@@ -38,6 +38,7 @@
 #define FLAME40     2  // Solenoid 40 points
 #define FLAME50     3  // Solenoid 50 points
 #define FLAME100    4  // Solenoid 100 points
+#define NUM_FLAMES_AND_HOLES  5
 //#define BALLRELEASE 5  // *** Not used (ball release switch was unreliable, omitted)
 
 // Scoreboard!
@@ -64,7 +65,8 @@
 
 #define FIRELEN     1000  // length of fire blast in usec
 
-#define _DEBUG_SERIAL
+//#define _DEBUG_SERIAL
+//#define _DEBUG_COUNT
 #ifdef _DEBUG_SERIAL
 #define _DEBUG_SERIAL_OUT(s) Serial.print(s)
 #else 
@@ -72,17 +74,22 @@
 #endif
 
 //Pin to Digit Conversion (Following 7 seg cathode configuration)
-int ONE[] = {LEDONE};
-int TEN[] = {LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG };
-int HUNDRED[] = {LEDHUNDREDA, LEDHUNDREDB, LEDHUNDREDC, LEDHUNDREDD, LEDHUNDREDE, LEDHUNDREDF, LEDHUNDREDG};
-int ALLSEGS[] = {LEDONE, LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG, LEDHUNDREDA, 
+#define NUM_ONE_LEDS 1
+#define NUM_TEN_LEDS 7
+#define NUM_HUNDRED_LEDS 7
+#define NUM_SEGS (NUM_ONE_LEDS + NUM_TEN_LEDS + NUM_HUNDRED_LEDS)
+
+int ONE[NUM_ONE_LEDS] = {LEDONE};
+int TEN[NUM_TEN_LEDS] = {LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG };
+int HUNDRED[NUM_HUNDRED_LEDS] = {LEDHUNDREDA, LEDHUNDREDB, LEDHUNDREDC, LEDHUNDREDD, LEDHUNDREDE, LEDHUNDREDF, LEDHUNDREDG};
+int ALLSEGS[NUM_SEGS] = {LEDONE, LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG, LEDHUNDREDA, 
       LEDHUNDREDB, LEDHUNDREDC, LEDHUNDREDD, LEDHUNDREDE, LEDHUNDREDF, LEDHUNDREDG};
 
 unsigned short score;
 
-//points must be same length as holes and firetime
-unsigned long firetime[5];
-Button holes[5] = { 
+// points must be same length as holes and firetime
+unsigned long firetime[NUM_FLAMES_AND_HOLES];
+Button holes[NUM_FLAMES_AND_HOLES] = { 
   Button(PIN20, BUTTON_PULLUP_INTERNAL, true, 1000),  
   Button(PIN30, BUTTON_PULLUP_INTERNAL, true, 1000), 
   Button(PIN40, BUTTON_PULLUP_INTERNAL, true, 1000),
@@ -90,7 +97,7 @@ Button holes[5] = {
   Button(PIN100, BUTTON_PULLUP_INTERNAL, true, 1000)
 };
 
-byte points[5] = {20, 30, 40, 50, 100};
+byte points[NUM_FLAMES_AND_HOLES] = {20, 30, 40, 50, 100};
 
 byte seven_seg_digits[10][7] = { 
   { 1,1,1,1,1,1,0 }, // ZERO
@@ -113,36 +120,15 @@ void setup() {
   Tlc.update();
   
   score = 0;
+  setScore(score);
   
-  updatescore(score);
-  
-  for(int c=0;c < sizeof(firetime);c++) {
+  for (int c = 0; c < NUM_FLAMES_AND_HOLES; c++) {
     firetime[c] = 0;
   }
   
 #ifdef _DEBUG_SERIAL
   Serial.begin(9600);
 #endif
-  
-  // *** WHAT DID THIS DO? *** //
-  /*Serial.begin(57600); // *** WHAT DID THIS DO? *** //
-  
-  pinMode(CTRLRE, OUTPUT); // RE receive active low
-  if( DEBUG ) {
-    digitalWrite(CTRLRE, HIGH);
-    Serial.println("starting...");
-  }
-  else {
-    digitalWrite(CTRLRE, LOW);
-  }
-  pinMode(CTRLDE, OUTPUT); // DE transmit active high
-  digitalWrite(CTRLDE, LOW);
-
-  delay(1000);
-  
-  idle = true;*/
-  // *** WHAT DID THIS DO? *** //
- 
 }
 
 
@@ -157,74 +143,81 @@ void setup() {
 //    x      x   x      x   x      x
 //     x 17 x     x 10 x     x 6 x
 
-  
-//Should explicitly update all segments of the display
-void updatescore(unsigned short score) {
-  unsigned short i, j, k;
+// Should explicitly update all segments of the display
+void setScore(unsigned short score) {
 
-
-  _DEBUG_SERIAL_OUT("HERE");
-
- // Zero Out Digits
- for(int c=0;c<sizeof(ALLSEGS);c++) {
-    Tlc.set(ALLSEGS[c],TLC_OFF);
+#ifdef _DEBUG_SERIAL
+  if (score > 999) {
+    Serial.println("Invalid score attempting to be set!");
   }
-      
-  //Ten Digit
-  i = (score / 10) % 10;
-  for(j=0;j<7;j++) {
-    if(seven_seg_digits[i][j]==1){
-      Tlc.set(TEN[j],TLC_ON);
+#endif
+
+  // Zero Out all the digits
+  for (int c = 0; c < NUM_SEGS; c++) {
+    Tlc.set(ALLSEGS[c], TLC_OFF);
+  }
+    
+  // Tens Digit
+  int i = (score / 10) % 10;
+  for (int j = 0; j < NUM_TEN_LEDS; j++) {
+    if (seven_seg_digits[i][j] == 1){
+      Tlc.set(TEN[j], TLC_ON);
     }
   }
   
-  //Hundred Digit
+  // Hundreds Digit
   i = (score / 100) % 10;
-  for(j=0;j<7;j++) {
-    if(seven_seg_digits[i][j]==1){
-      Tlc.set(HUNDRED[j],TLC_ON);
+  for (int j = 0; j < NUM_HUNDRED_LEDS; j++) {
+    if (seven_seg_digits[i][j] == 1){
+      Tlc.set(HUNDRED[j], TLC_ON);
     }
   }
   
-  //Zero Digit (on or off)
-  Tlc.set(ONE[0],TLC_ON);
+  // Zero Digit (on or off)
+  Tlc.set(ONE[0], TLC_ON);
   
   Tlc.update();
-  
 }
+
+#ifdef _DEBUG_COUNT
+int testCount = 0;
+#endif
 
 // main loop
 void loop() {
   
-  // turn off active flames when their time is up
-  for(int c=0;c < sizeof(firetime);c++) {
-    if( firetime[c] < millis() ) {
-      Tlc.set(c,TLC_OFF);
+  // Turn off active flames when their time is up
+  for (int c = 0; c < NUM_FLAMES_AND_HOLES; c++) {
+    if (firetime[c] < millis()) {
+      Tlc.set(c, TLC_OFF);
+    }
+  } 
+
+  // check button presses
+  for (int c = 0; c < NUM_FLAMES_AND_HOLES; c++) {
+    if (holes[c].uniquePress()) {
+      score += points[c];
+      firetime[c] = millis() + FIRELEN; 
+      Tlc.set(c, TLC_ON); //Flame on!
     }
   }
   
+#ifdef _DEBUG_SERIAL
+  Serial.print("points scored: ");
+  Serial.print(points[c]);
+  Serial.print(", total score: ");
+  Serial.print(score);
+#endif
+
+#ifdef _DEBUG_COUNT
+  delay(1000);
+  setScore(testCount);
+  testCount += 10;
+#else
+  setScore(score);
+#endif
+  
   Tlc.update();
-
-  // check button presses
-  for(int c=0;c < sizeof(holes);c++) {
-    if( holes[c].uniquePress() ) {
-      score += points[c];
-      updatescore(score);
-      
-      if( DEBUG ) {
-        Serial.print("points scored: ");
-        Serial.print(points[c]);
-        Serial.print(" total score: ");
-        Serial.print(score);
-      }
-
-      firetime[c] = millis() + FIRELEN; 
-      Tlc.set(c,TLC_ON); //Flame on!
-
-    }
-    
-    Tlc.update();
-  }
 }
 
 
