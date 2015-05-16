@@ -64,6 +64,13 @@
 
 #define FIRELEN     1000  // length of fire blast in usec
 
+#define _DEBUG_SERIAL
+#ifdef _DEBUG_SERIAL
+#define _DEBUG_SERIAL_OUT(s) Serial.print(s)
+#else 
+#define _DEBUG_SERIAL_OUT(s) (void)
+#endif
+
 //Pin to Digit Conversion (Following 7 seg cathode configuration)
 int ONE[] = {LEDONE};
 int TEN[] = {LEDTENA, LEDTENB, LEDTENC, LEDTEND, LEDTENE, LEDTENF, LEDTENG };
@@ -85,7 +92,8 @@ Button holes[5] = {
 
 byte points[5] = {20, 30, 40, 50, 100};
 
-byte seven_seg_digits[10][7] = { { 1,1,1,1,1,1,0 },  // ZERO
+byte seven_seg_digits[10][7] = { 
+  { 1,1,1,1,1,1,0 }, // ZERO
   { 0,1,1,0,0,0,0 }, // ONE
   { 1,1,0,1,1,0,1 }, // TWO
   { 1,1,1,1,0,0,1 }, // THREE
@@ -108,9 +116,13 @@ void setup() {
   
   updatescore(score);
   
-  for(c=0;c < sizeof(firetime);c++) {
+  for(int c=0;c < sizeof(firetime);c++) {
     firetime[c] = 0;
   }
+  
+#ifdef _DEBUG_SERIAL
+  Serial.begin(9600);
+#endif
   
   // *** WHAT DID THIS DO? *** //
   /*Serial.begin(57600); // *** WHAT DID THIS DO? *** //
@@ -150,8 +162,11 @@ void setup() {
 void updatescore(unsigned short score) {
   unsigned short i, j, k;
 
- //TODO: Zero Out Digits
- for(c=0;c<sizeof(ALLSEGS);c++) {
+
+  _DEBUG_SERIAL_OUT("HERE");
+
+ // Zero Out Digits
+ for(int c=0;c<sizeof(ALLSEGS);c++) {
     Tlc.set(ALLSEGS[c],TLC_OFF);
   }
       
@@ -182,7 +197,7 @@ void updatescore(unsigned short score) {
 void loop() {
   
   // turn off active flames when their time is up
-  for(c=0;c < sizeof(firetime);c++) {
+  for(int c=0;c < sizeof(firetime);c++) {
     if( firetime[c] < millis() ) {
       Tlc.set(c,TLC_OFF);
     }
@@ -191,7 +206,7 @@ void loop() {
   Tlc.update();
 
   // check button presses
-  for(c=0;c < sizeof(holes);c++) {
+  for(int c=0;c < sizeof(holes);c++) {
     if( holes[c].uniquePress() ) {
       score += points[c];
       updatescore(score);
